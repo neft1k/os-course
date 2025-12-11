@@ -6,3 +6,7 @@ build/
 
 # Python
 __pycache__/
+
+.idea/*
+
+some.bin
