@@ -8,3 +8,7 @@ build/
 __pycache__/
 
 .vscode
+
+.idea
+
+*.bin

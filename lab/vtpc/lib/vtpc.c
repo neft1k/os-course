@@ -74,10 +74,10 @@ static int vtpc_store(struct vtpc_file* file) {
   return -1;
 }
 
-static void vtpc_drop(int handle) {
-  if (handle < 0 || handle >= VTPC_MAX_FILES)
+static void vtpc_drop(int fd) {
+  if (fd < 0 || fd >= VTPC_MAX_FILES)
     return;
-  g_files[handle] = NULL;
+  g_files[fd] = NULL;
 }
 
 static int vtpc_open_raw(const char* path, int mode, int access, int* direct_io) {
@@ -155,9 +155,6 @@ static int vtpc_flush_page(struct vtpc_file* file, struct vtpc_page* page) {
   if (written < 0 || (size_t)written != write_len)
     return -1;
 
-#if defined(POSIX_FADV_DONTNEED)
-  (void)posix_fadvise(file->fd, page->base, (off_t)write_len, POSIX_FADV_DONTNEED);
-#endif
 
   if (write_len > len && ftruncate(file->fd, file->file_size) != 0)
     return -1;
@@ -210,7 +207,6 @@ static struct vtpc_page* vtpc_prepare_page(struct vtpc_file* file, off_t base) {
     page->in_use = 0;
     return NULL;
   }
-
 #if defined(POSIX_FADV_DONTNEED)
   (void)posix_fadvise(file->fd, page->base, (off_t)file->page_size, POSIX_FADV_DONTNEED);
 #endif
@@ -253,8 +249,19 @@ int vtpc_open(const char* path, int mode, int access) {
   file->page_size = page_size;
   file->capacity = VTPC_PAGE_CAPACITY;
 
+  int accmode = mode & O_ACCMODE;
+
   int direct_io = 0;
-  int fd = vtpc_open_raw(path, mode, access, &direct_io);
+  int fd = -1;
+
+  if (accmode == O_WRONLY) {
+    int rw_mode = (mode & ~O_ACCMODE) | O_RDWR;
+    fd = vtpc_open_raw(path, rw_mode, access, &direct_io);
+  }
+
+  if (fd < 0)
+    fd = vtpc_open_raw(path, mode, access, &direct_io);
+
   if (fd < 0) {
     free(file);
     return -1;
@@ -273,7 +280,6 @@ int vtpc_open(const char* path, int mode, int access) {
   file->direct_io = direct_io;
   file->access_clock = 0;
 
-  int accmode = mode & O_ACCMODE;
   file->can_read = (accmode == O_RDONLY || accmode == O_RDWR);
   file->can_write = (accmode == O_WRONLY || accmode == O_RDWR);
 
@@ -342,7 +348,7 @@ ssize_t vtpc_read(int fd, void* buf, size_t count) {
     size_t max_in_page = file->page_size - page_off;
 
     size_t remaining = count - total;
-    size_t available = (size_t)vtpc_min_size((size_t)(file->file_size - file->position), max_in_page);
+    size_t available = vtpc_min_size((size_t)(file->file_size - file->position), max_in_page);
     size_t chunk = vtpc_min_size(remaining, available);
 
     if (chunk == 0)
