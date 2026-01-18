@@ -6,3 +6,9 @@ build/
 
 # Python
 __pycache__/
+
+.vscode
+
+.idea
+
+*.bin
